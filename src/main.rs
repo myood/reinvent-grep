@@ -57,10 +57,21 @@ fn list_dir(path: &str, filename_regex: &Regex) -> Vec<PathBuf> {
         .collect()
 }
 
-fn parse_file(path: String) {
+fn parse_file_with_string(path: String, substr: &str) {
     match fs::read_to_string(&path) {
         Ok(_content) => {
-            
+            _content.lines()
+                .filter(|line| line.contains(substr))
+                .for_each(|line| println!("{:?}: {:?}", path, line))
+        },
+        Err(_) => return,
+    }
+}
+
+fn parse_file_with_regex(path: String, regex: &Regex) {
+    match fs::read_to_string(&path) {
+        Ok(_content) => {
+            println!("{:?}", _content)
         },
         Err(_) => return,
     }
@@ -157,12 +168,14 @@ fn main() {
         }
     });
 
+    let substr = args.string.unwrap_or("".to_string());
     let mut get_parse_threads = || {
         let mut t = Vec::new();
         while rx_parse_channels.len() > 0 {
             let maybe_rx_parse = rx_parse_channels.pop();
             match maybe_rx_parse {
                 Some(rx_parse) => {
+                    let substr_copy = substr.to_string();
                     t.push(thread::spawn(move || {
                         let mut parsed = 0;
                         let start = Instant::now();
@@ -170,7 +183,7 @@ fn main() {
                             let maybe_file = rx_parse.recv();
                             match maybe_file {
                                 Ok(file) => {
-                                    parse_file(file);
+                                    parse_file_with_string(file, &substr_copy);
                                     parsed += 1;
                                 }
                                 Err(_) => {
