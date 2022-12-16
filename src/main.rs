@@ -4,6 +4,29 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
+use num_cpus;
+use regex::Regex;
+use clap::Parser;
+use clap::ArgGroup;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+#[clap(group(
+    ArgGroup::new("lookup")
+        .required(true)
+        .args(&["string", "regex"]),
+))]
+struct Args {
+   #[clap(short, long, value_parser)]
+   concurrency_multiplier: Option<usize>,
+   #[clap(short, long)]
+   filename_regex: Option<String>,
+   #[clap(short, long)]
+   string: Option<String>,
+   #[clap(short, long)]
+   regex: Option<String>
+}
+
 fn split_dirs(paths: Vec<PathBuf>) -> (Vec<String>, Vec<String>) {
     let dirs = paths.iter()
                 .filter(|p| p.is_dir())
@@ -20,7 +43,7 @@ fn split_dirs(paths: Vec<PathBuf>) -> (Vec<String>, Vec<String>) {
     (dirs, files)
 }
 
-fn list_dir(path: &str) -> Vec<PathBuf> {
+fn list_dir(path: &str, filename_regex: &Regex) -> Vec<PathBuf> {
     let rd = fs::read_dir(path);
     if rd.is_err() {
         println!("{:?} - {:?}", path, rd.unwrap_err());
@@ -30,6 +53,7 @@ fn list_dir(path: &str) -> Vec<PathBuf> {
     rdi.filter(|de| de.is_ok())
         .map(|de| de.unwrap())
         .map(|de| de.path())
+        .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
         .collect()
 }
 
@@ -43,12 +67,27 @@ fn parse_file(path: String) {
 }
 
 fn main() {
+    let args = Args::parse();
+    let concurrency_multiplier = args.concurrency_multiplier.unwrap_or(1);
+    let num_parsers = num_cpus::get() * concurrency_multiplier;
+    let filename_regex = 
+        match Regex::new(&args.filename_regex.unwrap_or(".*".to_string())) {
+            Ok(v) => v,
+            Err(e) => {
+                println!("Error while parsing filename_regex: {:?}", e);
+                std::process::exit(1)
+            }
+        };
+
+    let start = Instant::now();
+
     let (tx_dirs, rx_dirs) = mpsc::channel();
     let (tx_files, rx_files) = mpsc::channel();
     let get_parse_channels = || { 
         let mut rxs = Vec::new();
         let mut txs = Vec::new();
-        for _i in 0..10 {
+        println!("Spawning {:?} parsers", num_parsers);
+        for _i in 0..num_parsers {
             let (tx, rx) = mpsc::channel();
             rxs.push(rx);
             txs.push(tx);
@@ -72,8 +111,7 @@ fn main() {
             match maybe_dirs {
                 Ok(dirs) => {
                     for dir in dirs {
-
-                        let entries = list_dir(&dir);
+                        let entries = list_dir(&dir, &filename_regex);
                         let (dirs, files) = split_dirs(entries);
                         if tx_dirs.send(dirs).is_err() {
                             println!("Error sending dirs");
@@ -167,4 +205,8 @@ fn main() {
             println!("Error while joining with parser.");
         }
     });
+
+    
+    let duration = start.elapsed();
+    println!("Total time: {:?}", duration);
 }
