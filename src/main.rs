@@ -1,3 +1,5 @@
+use std::io::{BufReader};
+use std::io::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -58,13 +60,20 @@ fn list_dir(path: &str, filename_regex: &Regex) -> Vec<PathBuf> {
 }
 
 fn parse_file_with_string(path: String, substr: &str) {
-    match fs::read_to_string(&path) {
-        Ok(_content) => {
-            _content.lines()
-                .filter(|line| line.contains(substr))
-                .for_each(|line| println!("{:?}: {:?}", path, line))
+    match fs::File::open(&path) {
+        Ok(maybe_file) => {
+            let file = BufReader::new(maybe_file);
+            for line in file.lines() {
+                match line {
+                    Ok(content) => { content.contains(substr); () }, // TODO: Add proper results printing (more overhead)
+
+                    Err(_) => return  // TODO: Add proper error handling (?)
+                                      //       Most likely file does not contain valid UTF-8 data
+                }
+            }
         },
-        Err(_) => return,
+        Err(_) => return,  // TODO: Add proper error handling (?)
+                           //       Most likely permission is denied to open a file
     }
 }
 
