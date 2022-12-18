@@ -2,7 +2,7 @@ use std::io::{BufReader};
 use std::io::prelude::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use crossbeam_channel::unbounded;
 use std::thread;
 use std::time::Instant;
 
@@ -67,14 +67,14 @@ fn main() {
 
     let start = Instant::now();
 
-    let (tx_dirs, rx_dirs) = mpsc::channel();
-    let (tx_files, rx_files) = mpsc::channel();
+    let (tx_dirs, rx_dirs) = unbounded();
+    let (tx_files, rx_files) = unbounded();
     let get_parse_channels = || { 
         let mut rxs = Vec::new();
         let mut txs = Vec::new();
         println!("Spawning {:?} parsers", num_parsers);
         for _i in 0..num_parsers {
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = unbounded();
             rxs.push(rx);
             txs.push(tx);
         }
