@@ -29,22 +29,6 @@ struct Args {
    regex: Option<String>
 }
 
-fn split_dirs(paths: Vec<PathBuf>) -> (Vec<String>, Vec<String>) {
-    let dirs = paths.iter()
-                .filter(|p| p.is_dir())
-                .map(|ps| ps.to_str())
-                .filter(|ps| ps.is_some())
-                .map(|ps| ps.unwrap().to_string())
-                .collect();
-    let files = paths.iter()
-                .filter(|p| !p.is_dir())
-                .map(|ps| ps.to_str())
-                .filter(|ps| ps.is_some())
-                .map(|ps| ps.unwrap().to_string())
-                .collect();
-    (dirs, files)
-}
-
 fn parse_file_with_string(path: PathBuf, substr: &str) {
     match fs::File::open(path) {
         Ok(maybe_file) => {
