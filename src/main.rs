@@ -45,22 +45,8 @@ fn split_dirs(paths: Vec<PathBuf>) -> (Vec<String>, Vec<String>) {
     (dirs, files)
 }
 
-fn list_dir(path: &str, filename_regex: &Regex) -> Vec<PathBuf> {
-    let rd = fs::read_dir(path);
-    if rd.is_err() {
-        println!("{:?} - {:?}", path, rd.unwrap_err());
-        return Vec::new()
-    }
-    let rdi = rd.unwrap();
-    rdi.filter(|de| de.is_ok())
-        .map(|de| de.unwrap())
-        .map(|de| de.path())
-        .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
-        .collect()
-}
-
-fn parse_file_with_string(path: String, substr: &str) {
-    match fs::File::open(&path) {
+fn parse_file_with_string(path: PathBuf, substr: &str) {
+    match fs::File::open(path) {
         Ok(maybe_file) => {
             let file = BufReader::new(maybe_file);
             for line in file.lines() {
@@ -116,8 +102,7 @@ fn main() {
     };
     let (tx_parse_channels, mut rx_parse_channels) = get_parse_channels();
 
-    let mut init = Vec::new();
-    init.push(".".to_string());
+    let init = std::path::PathBuf::from(".");
     if tx_dirs.send(init).is_err() {
         println!("Error initializing processing queues");
         std::process::exit(1);
@@ -127,21 +112,28 @@ fn main() {
         loop {
             // We are the only one pushing to the dirs channel (except initializer)
             // So if there is no dir on the queue, then there no more dirs to process
-            let maybe_dirs = rx_dirs.try_recv();
-            match maybe_dirs {
-                Ok(dirs) => {
-                    for dir in dirs {
-                        let entries = list_dir(&dir, &filename_regex);
-                        let (dirs, files) = split_dirs(entries);
-                        if tx_dirs.send(dirs).is_err() {
-                            println!("Error sending dirs");
-                            return
-                        }
-                        if tx_files.send(files).is_err() {
-                            println!("Error sending files");
-                            return
-                        }
+            let maybe_dir = rx_dirs.try_recv();
+            match maybe_dir {
+                Ok(dir) => {
+                    let rd = fs::read_dir(dir.to_str().unwrap_or(""));
+                    if rd.is_err() {
+                        continue;
                     }
+                    rd.unwrap()
+                        .filter(|de| de.is_ok())
+                        .map(|de| de.unwrap().path())
+                        .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
+                        .for_each(|path| {
+                            if path.is_dir() {
+                                if tx_dirs.send(path).is_err() {
+                                    println!("Error sending dir to dir walker");
+                                }
+                            } else {
+                                if tx_files.send(path).is_err() {
+                                    println!("Error sending file to parsers load balancer");
+                                }
+                            }
+                        });
                 }
                 Err(_) => {
                     // Notify file parser that no more files will be sent by closing the channel.
@@ -156,17 +148,15 @@ fn main() {
     let load_balancer = thread::spawn(move || {
         let mut it = 0;
         loop {
-            let maybe_files = rx_files.recv();
-            match maybe_files {
-                Ok(files) => {
-                    for file in files {
-                       let tx_parse = &tx_parse_channels[it];
-                       if tx_parse.send(file).is_err() {
-                           println!("Error sending file to parser '{:?}'", it);
-                           return
-                       }
-                       it = (it + 1) % tx_parse_channels.len();
+            let maybe_file = rx_files.recv();
+            match maybe_file {
+                Ok(file) => {
+                    let tx_parse = &tx_parse_channels[it];
+                    if tx_parse.send(file).is_err() {
+                        println!("Error sending file to parser '{:?}'", it);
+                        return
                     }
+                    it = (it + 1) % tx_parse_channels.len();
                 }
                 Err(_) => {
                     // No more files to distribute across parsers
