@@ -29,21 +29,17 @@ struct Args {
    regex: Option<String>
 }
 
-fn parse_file_with_string(path: PathBuf, substr: &str) {
-    match fs::File::open(path) {
-        Ok(maybe_file) => {
-            let file = BufReader::new(maybe_file);
-            for line in file.lines() {
-                match line {
-                    Ok(content) => { content.contains(substr); () }, // TODO: Add proper results printing (more overhead)
+fn parse_file_with_string(fd: std::fs::File, substr: &str) {
+    let file = BufReader::new(fd);
+    for line in file.lines() {
+        match line {
+            // TODO: Add proper results printing (more overhead)
+            Ok(content) => { content.contains(substr); () }, 
 
-                    Err(_) => return  // TODO: Add proper error handling (?)
-                                      //       Most likely file does not contain valid UTF-8 data
-                }
-            }
-        },
-        Err(_) => return,  // TODO: Add proper error handling (?)
-                           //       Most likely permission is denied to open a file
+            // TODO: Add proper error handling (?)
+            //       Most likely file does not contain valid UTF-8 data
+            Err(_) => return  
+        }
     }
 }
 
@@ -108,12 +104,15 @@ fn main() {
                         .map(|de| de.unwrap().path())
                         .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
                         .for_each(|path| {
-                            if path.is_dir() {
+                            let maybe_fd = std::fs::File::open(&path);
+                            if maybe_fd.is_err() {
+                                // It is likely a directory, or less likely permission denied
                                 if tx_dirs.send(path).is_err() {
                                     println!("Error sending dir to dir walker");
                                 }
-                            } else {
-                                if tx_files.send(path).is_err() {
+                            }
+                            else {
+                                if tx_files.send(maybe_fd.unwrap()).is_err() {
                                     println!("Error sending file to parsers load balancer");
                                 }
                             }
