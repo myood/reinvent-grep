@@ -55,7 +55,7 @@ fn parse_file_with_regex(path: String, regex: &Regex) {
 
 fn main() {
     let args = Args::parse();
-    let concurrency_multiplier = args.concurrency_multiplier.unwrap_or(1);
+    let concurrency_multiplier = args.concurrency_multiplier.unwrap_or(2);
     let num_parsers = num_cpus::get() * concurrency_multiplier;
     let filename_regex = 
         match Regex::new(&args.filename_regex.unwrap_or(".*".to_string())) {
