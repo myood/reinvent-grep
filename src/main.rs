@@ -1,7 +1,6 @@
 use std::io::{BufReader};
 use std::io::prelude::*;
 use std::fs;
-use std::path::PathBuf;
 use crossbeam_channel::unbounded;
 use std::thread;
 use std::time::Instant;
@@ -29,18 +28,20 @@ struct Args {
    regex: Option<String>
 }
 
-fn parse_file_with_string(fd: std::fs::File, substr: &str) {
-    let file = BufReader::new(fd);
-    for line in file.lines() {
-        match line {
-            // TODO: Add proper results printing (more overhead)
-            Ok(content) => { content.contains(substr); () }, 
-
-            // TODO: Add proper error handling (?)
-            //       Most likely file does not contain valid UTF-8 data
-            Err(_) => return  
-        }
-    }
+fn parse_file_with_string(fd: std::fs::File, path: &std::path::PathBuf, substr: &str) -> Vec<String> {
+    let mut header = [path.to_str().unwrap(), ":"].join("");
+    std::iter::once(header).chain(
+        BufReader::new(fd).lines()
+            .take_while(|line| line.is_ok())
+            .filter_map(|line| {
+                let txt = line.unwrap();
+                if txt.contains(substr) {
+                    Some(txt)
+                } else {
+                    None
+                }
+            }))
+        .collect::<Vec<String>>()
 }
 
 fn parse_file_with_regex(path: String, regex: &Regex) {
@@ -82,6 +83,8 @@ fn main() {
     };
     let (tx_parse_channels, mut rx_parse_channels) = get_parse_channels();
 
+    let (tx_output, rx_output) = unbounded();
+
     let init = std::path::PathBuf::from(".");
     if tx_dirs.send(init).is_err() {
         println!("Error initializing processing queues");
@@ -112,7 +115,7 @@ fn main() {
                                 }
                             }
                             else {
-                                if tx_files.send(maybe_fd.unwrap()).is_err() {
+                                if tx_files.send( (maybe_fd.unwrap(), path) ).is_err() {
                                     println!("Error sending file to parsers load balancer");
                                 }
                             }
@@ -158,15 +161,22 @@ fn main() {
             match maybe_rx_parse {
                 Some(rx_parse) => {
                     let substr_copy = substr.to_string();
+                    let tx_output_copy = tx_output.clone();
                     t.push(thread::spawn(move || {
                         let mut parsed = 0;
                         let start = Instant::now();
                         loop {
                             let maybe_file = rx_parse.recv();
                             match maybe_file {
-                                Ok(file) => {
-                                    parse_file_with_string(file, &substr_copy);
+                                Ok( (file, path) ) => {
+                                    let out = parse_file_with_string(file, &path, &substr_copy);
                                     parsed += 1;
+                                    if out.len() > 1 {
+                                        match tx_output_copy.send(out) {
+                                            Err(e) => println!("Error to send output to displayer: {:?}", e),
+                                            _ => continue,
+                                        }
+                                    }
                                 }
                                 Err(_) => {
                                     let duration = start.elapsed();
@@ -187,6 +197,17 @@ fn main() {
 
     let parse_threads = get_parse_threads();
 
+    let displayer = thread::spawn(move || {
+        println!("Displayer started");
+        loop {
+            match rx_output.recv() {
+                Ok(data) => data.iter().for_each(|msg| println!("{}", msg)),
+                Err(_) => return,
+            }
+        }
+        println!("Displayer stopped");
+    });
+
     if dir_walker.join().is_err() {
         println!("Error while joining with directory traverser.");
     }
@@ -201,6 +222,11 @@ fn main() {
         }
     });
 
+    drop(tx_output);
+
+    if displayer.join().is_err() {
+        println!("Error while joining with the output displayer");
+    }
     
     let duration = start.elapsed();
     println!("Total time: {:?}", duration);
