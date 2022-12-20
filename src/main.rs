@@ -70,19 +70,6 @@ fn main() {
 
     let (tx_dirs, rx_dirs) = unbounded();
     let (tx_files, rx_files) = unbounded();
-    let get_parse_channels = || { 
-        let mut rxs = Vec::new();
-        let mut txs = Vec::new();
-        println!("Spawning {:?} parsers", num_parsers);
-        for _i in 0..num_parsers {
-            let (tx, rx) = unbounded();
-            rxs.push(rx);
-            txs.push(tx);
-        }
-        (txs, rxs)
-    };
-    let (tx_parse_channels, mut rx_parse_channels) = get_parse_channels();
-
     let (tx_output, rx_output) = unbounded();
 
     let init = std::path::PathBuf::from(".");
@@ -116,7 +103,7 @@ fn main() {
                             }
                             else {
                                 if tx_files.send( (maybe_fd.unwrap(), path) ).is_err() {
-                                    println!("Error sending file to parsers load balancer");
+                                    println!("Error sending file to parsers");
                                 }
                             }
                         });
@@ -131,66 +118,38 @@ fn main() {
         }
     });
 
-    let load_balancer = thread::spawn(move || {
-        let mut it = 0;
-        loop {
-            let maybe_file = rx_files.recv();
-            match maybe_file {
-                Ok(file) => {
-                    let tx_parse = &tx_parse_channels[it];
-                    if tx_parse.send(file).is_err() {
-                        println!("Error sending file to parser '{:?}'", it);
-                        return
-                    }
-                    it = (it + 1) % tx_parse_channels.len();
-                }
-                Err(_) => {
-                    // No more files to distribute across parsers
-                    // tx_parse_channels implicitly dropped
-                    return
-                }
-            }
-        }
-    });
-
     let substr = args.string.unwrap_or("".to_string());
     let mut get_parse_threads = || {
         let mut t = Vec::new();
-        while rx_parse_channels.len() > 0 {
-            let maybe_rx_parse = rx_parse_channels.pop();
-            match maybe_rx_parse {
-                Some(rx_parse) => {
-                    let substr_copy = substr.to_string();
-                    let tx_output_copy = tx_output.clone();
-                    t.push(thread::spawn(move || {
-                        let mut parsed = 0;
-                        let start = Instant::now();
-                        loop {
-                            let maybe_file = rx_parse.recv();
-                            match maybe_file {
-                                Ok( (file, path) ) => {
-                                    let out = parse_file_with_string(file, &path, &substr_copy);
-                                    parsed += 1;
-                                    if out.len() > 1 {
-                                        match tx_output_copy.send(out) {
-                                            Err(e) => println!("Error to send output to displayer: {:?}", e),
-                                            _ => continue,
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    let duration = start.elapsed();
-                                    println!("Parsed {:?} files in {:?}.", parsed, duration);
-                                    return
+        for n in 0..num_parsers {
+            let rx_parse = rx_files.clone();
+            let substr_copy = substr.to_string();
+            let tx_output_copy = tx_output.clone();
+            t.push(thread::spawn(move || {
+                let mut parsed = 0;
+                let start = Instant::now();
+                loop {
+                    let maybe_file = rx_parse.recv();
+                    match maybe_file {
+                        Ok( (file, path) ) => {
+                            let out = parse_file_with_string(file, &path, &substr_copy);
+                            parsed += 1;
+                            if out.len() > 1 {
+                                match tx_output_copy.send(out) {
+                                    Err(e) => println!("Error to send output to displayer: {:?}", e),
+                                    _ => continue,
                                 }
                             }
                         }
-                    }))
-                },
-                None => {
-                    println!("Internal error while spawning parsers.");
+                        Err(_) => {
+                            let duration = start.elapsed();
+                            println!("Parsed {:?} files in {:?}.", parsed, duration);
+                            return
+                        }
+                    }
                 }
-            }
+            }))
+
         }
         t
     };
@@ -198,21 +157,16 @@ fn main() {
     let parse_threads = get_parse_threads();
 
     let displayer = thread::spawn(move || {
-        println!("Displayer started");
         loop {
             match rx_output.recv() {
                 Ok(data) => data.iter().for_each(|msg| println!("{}", msg)),
-                Err(_) => return,
+                Err(_) => { return },
             }
         }
-        println!("Displayer stopped");
     });
 
     if dir_walker.join().is_err() {
         println!("Error while joining with directory traverser.");
-    }
-    if load_balancer.join().is_err() {
-        println!("Error while joining with load balancer.");
     }
     parse_threads
     .into_iter()
