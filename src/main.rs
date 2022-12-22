@@ -88,16 +88,14 @@ fn main() {
                     .map(|de| de.unwrap().path())
                     .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
                     .for_each(|path| {
-                        let maybe_fd = std::fs::File::open(&path);
-                        if maybe_fd.is_err() {
-                            // It is likely a directory, or less likely permission denied
-                            if tx_dirs.send(path).is_err() {
-                                println!("Error sending dir to dir walker");
+                        if let Ok(fd) = std::fs::File::open(&path) {
+                            if tx_files.send( (fd, path) ).is_err() {
+                                println!("Error sending file to parsers");
                             }
                         }
-                        else {
-                            if tx_files.send( (maybe_fd.unwrap(), path) ).is_err() {
-                                println!("Error sending file to parsers");
+                        else {// It is likely a directory, or less likely permission denied
+                            if tx_dirs.send(path).is_err() {
+                                println!("Error sending dir to dir walker");
                             }
                         }
                     });
