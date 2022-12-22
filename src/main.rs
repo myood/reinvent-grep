@@ -47,32 +47,23 @@ fn parse_file_with_string(fd: std::fs::File, path: &str, substr: &str) -> Vec<St
 fn spawn_dir_walker_thread(tx_dirs: Sender<std::path::PathBuf>, rx_dirs: Receiver<std::path::PathBuf>, tx_files: Sender<(std::fs::File, std::path::PathBuf)>) -> JoinHandle<()>
 {
     thread::spawn(move || {
-        loop {
-            // We are the only one pushing to the dirs channel (except initializer)
-            // So if there is no dir on the queue, then there no more dirs to process
-            if let Ok(dir) = rx_dirs.try_recv() {
-                if let Ok(rd) = fs::read_dir(dir.to_str().unwrap_or("")) {
-                    rd.filter(|de| de.is_ok())
-                    .map(|de| de.unwrap().path())
-                    //.filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
-                    .for_each(|path| {
-                        if let Ok(fd) = std::fs::File::open(&path) {
-                            if tx_files.send( (fd, path) ).is_err() {
-                                println!("Error sending file to parsers");
-                            }
+        while let Ok(dir) = rx_dirs.try_recv() {
+            if let Ok(rd) = fs::read_dir(dir.to_str().unwrap_or("")) {
+                rd.filter(|de| de.is_ok())
+                .map(|de| de.unwrap().path())
+                //.filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
+                .for_each(|path| {
+                    if let Ok(fd) = std::fs::File::open(&path) {
+                        if tx_files.send( (fd, path) ).is_err() {
+                            println!("Error sending file to parsers");
                         }
-                        else {// It is likely a directory, or less likely permission denied
-                            if tx_dirs.send(path).is_err() {
-                                println!("Error sending dir to dir walker");
-                            }
+                    }
+                    else {// It is likely a directory, or less likely permission denied
+                        if tx_dirs.send(path).is_err() {
+                            println!("Error sending dir to dir walker");
                         }
-                    });
-                }
-            }
-            else {
-                // Notify file parser that no more files will be sent by closing the channel.
-                // All already sent files will be processed accordingly.
-                return
+                    }
+                });
             }
         }
     })
