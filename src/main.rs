@@ -111,28 +111,19 @@ fn main() {
             t.push(thread::spawn(move || {
                 let mut parsed = 0;
                 let start = Instant::now();
-                loop {
-                    let maybe_file = rx_parse.recv();
-                    match maybe_file {
-                        Ok( (file, path) ) => {
-                            let out = parse_file_with_string(file, &path, &substr_copy);
-                            parsed += 1;
-                            if out.len() > 1 {
-                                match tx_output_copy.send(out) {
-                                    Err(e) => println!("Error to send output to displayer: {:?}", e),
-                                    _ => continue,
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            let duration = start.elapsed();
-                            println!("Parsed {:?} files in {:?}.", parsed, duration);
-                            return
+                while let Ok((file, path)) = rx_parse.recv() {
+                    let out = parse_file_with_string(file, &path, &substr_copy);
+                    parsed += 1;
+                    if out.len() > 1 {
+                        match tx_output_copy.send(out) {
+                            Err(e) => println!("Error to send output to displayer: {:?}", e),
+                            _ => continue,
                         }
                     }
                 }
-            }))
-
+                let duration = start.elapsed();
+                println!("Parsed {:?} files in {:?}.", parsed, duration);
+            }));
         }
         t
     };
