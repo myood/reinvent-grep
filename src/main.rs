@@ -29,7 +29,7 @@ struct Args {
 }
 
 fn parse_file_with_string(fd: std::fs::File, path: &std::path::PathBuf, substr: &str) -> Vec<String> {
-    let mut header = [path.to_str().unwrap(), ":"].join("");
+    let header = [path.to_str().unwrap(), ":"].join("");
     std::iter::once(header).chain(
         BufReader::new(fd).lines()
             .take_while(|line| line.is_ok())
@@ -42,15 +42,6 @@ fn parse_file_with_string(fd: std::fs::File, path: &std::path::PathBuf, substr: 
                 }
             }))
         .collect::<Vec<String>>()
-}
-
-fn parse_file_with_regex(path: String, regex: &Regex) {
-    match fs::read_to_string(&path) {
-        Ok(_content) => {
-            println!("{:?}", _content)
-        },
-        Err(_) => return,
-    }
 }
 
 fn main() {
@@ -111,9 +102,9 @@ fn main() {
     });
 
     let substr = args.string.unwrap_or("".to_string());
-    let mut get_parse_threads = || {
+    let get_parse_threads = || {
         let mut t = Vec::new();
-        for n in 0..num_parsers {
+        for _ in 0..num_parsers {
             let rx_parse = rx_files.clone();
             let substr_copy = substr.to_string();
             let tx_output_copy = tx_output.clone();
