@@ -82,38 +82,32 @@ fn main() {
         loop {
             // We are the only one pushing to the dirs channel (except initializer)
             // So if there is no dir on the queue, then there no more dirs to process
-            let maybe_dir = rx_dirs.try_recv();
-            match maybe_dir {
-                Ok(dir) => {
-                    let rd = fs::read_dir(dir.to_str().unwrap_or(""));
-                    if rd.is_err() {
-                        continue;
-                    }
-                    rd.unwrap()
-                        .filter(|de| de.is_ok())
-                        .map(|de| de.unwrap().path())
-                        .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
-                        .for_each(|path| {
-                            let maybe_fd = std::fs::File::open(&path);
-                            if maybe_fd.is_err() {
-                                // It is likely a directory, or less likely permission denied
-                                if tx_dirs.send(path).is_err() {
-                                    println!("Error sending dir to dir walker");
-                                }
+            if let Ok(dir) = rx_dirs.try_recv() {
+                if let Ok(rd) = fs::read_dir(dir.to_str().unwrap_or("")) {
+                    rd.filter(|de| de.is_ok())
+                    .map(|de| de.unwrap().path())
+                    .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
+                    .for_each(|path| {
+                        let maybe_fd = std::fs::File::open(&path);
+                        if maybe_fd.is_err() {
+                            // It is likely a directory, or less likely permission denied
+                            if tx_dirs.send(path).is_err() {
+                                println!("Error sending dir to dir walker");
                             }
-                            else {
-                                if tx_files.send( (maybe_fd.unwrap(), path) ).is_err() {
-                                    println!("Error sending file to parsers");
-                                }
+                        }
+                        else {
+                            if tx_files.send( (maybe_fd.unwrap(), path) ).is_err() {
+                                println!("Error sending file to parsers");
                             }
-                        });
+                        }
+                    });
                 }
-                Err(_) => {
-                    // Notify file parser that no more files will be sent by closing the channel.
-                    // All already sent files will be processed accordingly.
-                    drop(tx_files);
-                    return
-                }
+            }
+            else {
+                // Notify file parser that no more files will be sent by closing the channel.
+                // All already sent files will be processed accordingly.
+                drop(tx_files);
+                return
             }
         }
     });
