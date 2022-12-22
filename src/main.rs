@@ -131,11 +131,8 @@ fn main() {
     let parse_threads = get_parse_threads();
 
     let displayer = thread::spawn(move || {
-        loop {
-            match rx_output.recv() {
-                Ok(data) => data.iter().for_each(|msg| println!("{}", msg)),
-                Err(_) => { return },
-            }
+        while let Ok(data) = rx_output.recv() {
+            data.iter().for_each(|msg| println!("{}", msg));
         }
     });
 
