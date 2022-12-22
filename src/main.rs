@@ -44,6 +44,40 @@ fn parse_file_with_string(fd: std::fs::File, path: &str, substr: &str) -> Vec<St
         .collect::<Vec<String>>()
 }
 
+fn spawn_dir_walker_thread(tx_dirs: Sender<std::path::PathBuf>, rx_dirs: Receiver<std::path::PathBuf>, tx_files: Sender<(std::fs::File, std::path::PathBuf)>) -> JoinHandle<()>
+{
+    thread::spawn(move || {
+        loop {
+            // We are the only one pushing to the dirs channel (except initializer)
+            // So if there is no dir on the queue, then there no more dirs to process
+            if let Ok(dir) = rx_dirs.try_recv() {
+                if let Ok(rd) = fs::read_dir(dir.to_str().unwrap_or("")) {
+                    rd.filter(|de| de.is_ok())
+                    .map(|de| de.unwrap().path())
+                    //.filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
+                    .for_each(|path| {
+                        if let Ok(fd) = std::fs::File::open(&path) {
+                            if tx_files.send( (fd, path) ).is_err() {
+                                println!("Error sending file to parsers");
+                            }
+                        }
+                        else {// It is likely a directory, or less likely permission denied
+                            if tx_dirs.send(path).is_err() {
+                                println!("Error sending dir to dir walker");
+                            }
+                        }
+                    });
+                }
+            }
+            else {
+                // Notify file parser that no more files will be sent by closing the channel.
+                // All already sent files will be processed accordingly.
+                return
+            }
+        }
+    })
+}
+
 fn spawn_parser_thread(rx_parse: Receiver<(std::fs::File, std::path::PathBuf)>, substr: String, tx_output: Sender<Vec<String>>) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut parsed = 0;
@@ -67,7 +101,7 @@ fn main() {
     let args = Args::parse();
     let concurrency_multiplier = args.concurrency_multiplier.unwrap_or(2);
     let num_parsers = num_cpus::get() * concurrency_multiplier;
-    let filename_regex = 
+    let _filename_regex = 
         match Regex::new(&args.filename_regex.unwrap_or(".*".to_string())) {
             Ok(v) => v,
             Err(e) => {
@@ -88,48 +122,25 @@ fn main() {
         std::process::exit(1);
     };
 
-    let dir_walker = thread::spawn(move || {
-        loop {
-            // We are the only one pushing to the dirs channel (except initializer)
-            // So if there is no dir on the queue, then there no more dirs to process
-            if let Ok(dir) = rx_dirs.try_recv() {
-                if let Ok(rd) = fs::read_dir(dir.to_str().unwrap_or("")) {
-                    rd.filter(|de| de.is_ok())
-                    .map(|de| de.unwrap().path())
-                    .filter(|path| filename_regex.is_match(path.to_str().unwrap_or("")))
-                    .for_each(|path| {
-                        if let Ok(fd) = std::fs::File::open(&path) {
-                            if tx_files.send( (fd, path) ).is_err() {
-                                println!("Error sending file to parsers");
-                            }
-                        }
-                        else {// It is likely a directory, or less likely permission denied
-                            if tx_dirs.send(path).is_err() {
-                                println!("Error sending dir to dir walker");
-                            }
-                        }
-                    });
-                }
-            }
-            else {
-                // Notify file parser that no more files will be sent by closing the channel.
-                // All already sent files will be processed accordingly.
-                drop(tx_files);
-                return
-            }
+    let dir_walker = {
+        let mut t = Vec::new();
+        for _ in 0..num_parsers {
+            t.push(spawn_dir_walker_thread(tx_dirs.clone(), rx_dirs.clone(), tx_files.clone()));
         }
-    });
+
+        t
+    };
 
     let substr = args.string.unwrap_or("".to_string());
-    let get_parse_threads = || {
+
+    let parse_threads = {
         let mut t = Vec::new();
         for _ in 0..num_parsers {
             t.push(spawn_parser_thread(rx_files.clone(), substr.to_string(), tx_output.clone()));
         }
+
         t
     };
-
-    let parse_threads = get_parse_threads();
 
     let displayer = thread::spawn(move || {
         while let Ok(data) = rx_output.recv() {
@@ -137,9 +148,13 @@ fn main() {
         }
     });
 
-    if dir_walker.join().is_err() {
-        println!("Error while joining with directory traverser.");
-    }
+    dir_walker
+    .into_iter()
+    .for_each(|h| {
+        if h.join().is_err() {
+            println!("Error while joining with directory traverser.");
+        }
+    });
     parse_threads
     .into_iter()
     .for_each(|h| {
@@ -147,8 +162,6 @@ fn main() {
             println!("Error while joining with parser.");
         }
     });
-
-    drop(tx_output);
 
     if displayer.join().is_err() {
         println!("Error while joining with the output displayer");
