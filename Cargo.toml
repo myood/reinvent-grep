@@ -11,3 +11,4 @@ log = "0.4.17"
 num_cpus = "1.13.1"
 clap = { version = "3.2.20", features = ["derive"] }
 crossbeam-channel = "0.5.6"
+jwalk = "0.8.1"
