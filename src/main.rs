@@ -39,14 +39,14 @@ fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), Option<File>)>>) -> Jo
         .process_read_dir(|_, _, _, dir_entry_results| {
             dir_entry_results.iter_mut().for_each(|f| {
                 if let Ok(entry) = f {
-                    if entry.file_type().is_file() {
-                        if let Ok(file) = File::open(entry.path()) {
-                            entry.client_state = Some(file);
-                        }
+                    if let Ok(file) = File::open(entry.path()) {
+                        entry.client_state = Some(file);
+                    } else {
+                        entry.client_state = None;
                     }
                 }
             })
-        }) 
+        })
         {
             if let Ok(entry) = entry {
                 if tx_files.clone().send(entry).is_err() {
