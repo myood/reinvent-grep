@@ -56,9 +56,25 @@ mod tests {
     fn failed_clone_test() {
         TemporaryRepository::new("xxx https://github.com/alexcrichton/git2-rs");
     }
+    
+    fn run_cmd(cmd: &str, args: Vec<&str>) -> Vec<String> {
+        let mut rv = String::from_utf8(
+            Command::new(cmd)
+                .args(args)
+                .output()
+                .expect("failed to execute model grep process")
+                .stdout,
+        )
+        .unwrap()        
+        .split_ascii_whitespace()
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+        rv.sort();
+        rv
+    }
 
-    fn run_model_grep(lookup_literal: &str, cwd: &str) -> String {
-        let args = [
+    fn run_model_grep(lookup_literal: &str, cwd: &str) -> Vec<String> {
+        let args = vec![
             "--fixed-strings", lookup_literal,
             "--files-with-matches",
             "--no-line-number",
@@ -67,29 +83,15 @@ mod tests {
             "--color", "never",
             cwd
         ];
-        String::from_utf8(
-            Command::new("rg")
-                .args(args)
-                .output()
-                .expect("failed to execute model grep process")
-                .stdout,
-        )
-        .unwrap()
+        run_cmd("rg", args)
     }
 
-    fn run_sut(lookup_literal: &str, cwd: &str) -> String {
-        let args = [
+    fn run_sut(lookup_literal: &str, cwd: &str) -> Vec<String> {
+        let args = vec![
             "--string", lookup_literal,
             "--directory", cwd,
             "--matching-files-only", "true"];
-        String::from_utf8(
-            Command::new(env!("CARGO_BIN_EXE_RR"))
-                .args(args)
-                .output()
-                .expect("failed to execute model grep process")
-                .stdout,
-        )
-        .unwrap()
+        run_cmd(env!("CARGO_BIN_EXE_RR"), args)
     }
 
     #[test]
@@ -174,16 +176,8 @@ mod tests {
         
         for keyword in keywords {
             let lookup_string = format!("\"{}\"", keyword);
-            let mut model = run_model_grep(&lookup_string, &dataset.dir.path_str())
-                .split_ascii_whitespace()
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>();
-            model.sort();
-            let mut sut = run_sut(&lookup_string, &dataset.dir.path_str())
-                .split_ascii_whitespace()
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>();
-            sut.sort();
+            let model = run_model_grep(&lookup_string, &dataset.dir.path_str());
+            let sut = run_sut(&lookup_string, &dataset.dir.path_str());
             assert_eq!(model, sut);
         }
     }
