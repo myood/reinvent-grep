@@ -3,7 +3,6 @@ use std::io::prelude::*;
 use std::fs::File;
 use crossbeam_channel::{Sender, Receiver};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
 
 use num_cpus;
 use regex::Regex;
@@ -27,12 +26,16 @@ struct Args {
    #[clap(short, long)]
    string: Option<String>,
    #[clap(short, long)]
-   regex: Option<String>
+   regex: Option<String>,
+   #[clap(short, long)]
+   directory: Option<String>,
+   #[clap(short, long)]
+   matching_files_only: Option<bool>,
 }
 
-fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), Option<File>)>>) -> JoinHandle<()> {
+fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), Option<File>)>>, dir: String) -> JoinHandle<()> {
     thread::spawn(move || {
-        for entry in WalkDirGeneric::<((), Option<File>)>::new(".")
+        for entry in WalkDirGeneric::<((), Option<File>)>::new(dir)
         .sort(false)
         .skip_hidden(true)
         .follow_links(false)
@@ -59,9 +62,17 @@ fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), Option<File>)>>) -> Jo
     })
 }
 
+fn does_file_match(fd: File, substr:& str) -> bool {
+    BufReader::new(fd).lines()
+        .take_while(|line| line.is_ok())
+        .any(|line| {
+            let txt = line.unwrap();
+            txt.contains(substr)
+        })
+}
+
 fn parse_file_with_string(fd: File, path: &str, substr: &str) -> Vec<String> {
-    let header = [path, ":"].join("");
-    std::iter::once(header).chain(
+    std::iter::once(path.to_string()).chain(
         BufReader::new(fd).lines()
             .take_while(|line| line.is_ok())
             .filter_map(|line| {
@@ -75,33 +86,35 @@ fn parse_file_with_string(fd: File, path: &str, substr: &str) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-fn spawn_parser_thread(rx_parse: Receiver<jwalk::DirEntry<((), Option<File>)>>, substr: String, tx_output: Sender<Vec<String>>) -> JoinHandle<()> {
+fn spawn_parser_thread(rx_parse: Receiver<jwalk::DirEntry<((), Option<File>)>>, substr: String, tx_output: Sender<Vec<String>>, matching_files_only: bool) -> JoinHandle<()> {
     thread::spawn(move || {
-        let mut parsed = 0;
-        let start = Instant::now();
         while let Ok(entry) = rx_parse.recv() {
             let path = entry.path();
             if let Some(file) = entry.client_state {
-                let out = parse_file_with_string(file, path.to_str().unwrap_or(""), &substr);
-                parsed += 1;
-                if out.len() > 1 {
-                    match tx_output.send(out) {
-                        Err(e) => println!("Error to send output to displayer: {:?}", e),
-                        _ => continue,
+                if matching_files_only {
+                    if does_file_match(file, &substr) {
+                        match tx_output.send(vec![path.to_string_lossy().to_string()]) {
+                            Err(e) => println!("Error to send output to displayer: {:?}", e),
+                            _ => continue,
+                        }
+                    }
+                } else {
+                    let out = parse_file_with_string(file, path.to_str().unwrap_or(""), &substr);
+                    if out.len() > 1 {
+                        match tx_output.send(out) {
+                            Err(e) => println!("Error to send output to displayer: {:?}", e),
+                            _ => continue,
+                        }
                     }
                 }
             }
         }
-        let duration = start.elapsed();
-        println!("Parsed {:?} files in {:?}.", parsed, duration);
 
         drop(tx_output);
     })
 }
 
 fn main() {
-    let start = Instant::now();
-
     let args = Args::parse();
     let concurrency_multiplier = args.concurrency_multiplier.unwrap_or(2);
     let num_parsers = num_cpus::get() * concurrency_multiplier;
@@ -113,18 +126,20 @@ fn main() {
                 std::process::exit(1)
             }
         };
+    let directory = args.directory.unwrap_or(".".to_string());
+    let matching_files_only = args.matching_files_only.unwrap_or(false);
 
     let (tx_files, rx_files) = crossbeam_channel::unbounded();
     let (tx_output, rx_output) = crossbeam_channel::unbounded();
     
-    let dir_walker = parse_dir_walker_thread(tx_files);
+    let dir_walker = parse_dir_walker_thread(tx_files, directory);
 
     let substr = args.string.unwrap_or("".to_string());
 
     let parse_threads = {
         let mut t = Vec::new();
         for _ in 0..num_parsers {
-            t.push(spawn_parser_thread(rx_files.clone(), substr.to_string(), tx_output.clone()));
+            t.push(spawn_parser_thread(rx_files.clone(), substr.to_string(), tx_output.clone(), matching_files_only));
         }
 
         t
@@ -152,7 +167,4 @@ fn main() {
     if displayer.join().is_err() {
         println!("Error while joining with the output displayer");
     }
-    
-    let duration = start.elapsed();
-    println!("Total time: {:?}", duration);
 }
