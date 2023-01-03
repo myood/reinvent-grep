@@ -15,3 +15,5 @@ jwalk = "0.8.1"
 
 [dev-dependencies]
 quickcheck = "1.0.3"
+git2 = "0.15.0"
+tempfile = "3.3.0"
