@@ -55,4 +55,22 @@ mod tests {
     fn failed_clone_test() {
         TemporaryRepository::new("xxx https://github.com/alexcrichton/git2-rs");
     }
+
+    #[test]
+    fn subprocess_test() {
+        let output = if cfg!(target_os = "windows") {
+            Command::new("cmd")
+                    .args(["/C", "echo hello"])
+                    .output()
+                    .expect("failed to execute process")
+        } else {
+            Command::new("sh")
+                    .arg("-c")
+                    .arg("echo hello")
+                    .output()
+                    .expect("failed to execute process")
+        };
+        let output = String::from_utf8(output.stdout).unwrap();
+        assert!("hello".to_string().trim() == output.trim());
+    }
 }
