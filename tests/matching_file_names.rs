@@ -90,7 +90,10 @@ mod tests {
             "--string", lookup_literal,
             "--directory", cwd,
             "--matching-files-only", "true"];
-        let cmd: &'static str = env!("CARGO_BIN_EXE_RR");
+        // In case of Github CI Action the environment variable is not set.
+        // In production ready project the CI Actions would define the variable depending on the build type to mitigate the issue.
+        // But in this playground project I don't care about learning CI Actions syntax.
+        let cmd: &'static str = option_env!("CARGO_BIN_EXE_RR").unwrap_or("target/debug/rr");
         run_cmd(cmd, args)
     }
 
