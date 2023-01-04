@@ -5,7 +5,6 @@ extern crate quickcheck;
 #[cfg(test)]
 mod tests {
     use git2::Repository;
-    use quickcheck::{TestResult, Testable};
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -41,12 +40,12 @@ mod tests {
 
     #[test]
     fn clone_test() {
-        let mut path = String::new();
+        let mut path = Option::None;
         {
             let tmp = TemporaryRepository::new("https://github.com/alexcrichton/git2-rs");
-            path = tmp.dir.path_str();
+            path = Option::Some(tmp.dir.path_str());
         }
-        if !path.is_empty() {
+        if let Some(path) = path {
             assert!(std::fs::read_dir(&path).is_err());
         }
     }
@@ -91,7 +90,8 @@ mod tests {
             "--string", lookup_literal,
             "--directory", cwd,
             "--matching-files-only", "true"];
-        run_cmd(env!("CARGO_BIN_EXE_RR"), args)
+        let cmd: &'static str = env!("CARGO_BIN_EXE_RR");
+        run_cmd(cmd, args)
     }
 
     #[test]
