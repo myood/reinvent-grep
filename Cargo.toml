@@ -12,8 +12,14 @@ num_cpus = "1.13.1"
 clap = { version = "3.2.20", features = ["derive"] }
 crossbeam-channel = "0.5.6"
 jwalk = "0.8.1"
+brunch = "0.3.7"
+rand = "0.8.5"
 
 [dev-dependencies]
 quickcheck = "1.0.3"
 git2 = "0.15.0"
 tempfile = "3.3.0"
+
+[[bench]]
+name = "flat_dir"
+harness = false
