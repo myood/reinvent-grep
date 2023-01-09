@@ -24,3 +24,5 @@ jobs:
       run: sudo apt install -y ripgrep
     - name: Run tests
       run: cargo test --verbose
+    - name: Run benches
+      run: cargo bench --verbose
