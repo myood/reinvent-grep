@@ -33,23 +33,12 @@ struct Args {
    matching_files_only: Option<bool>,
 }
 
-fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), Option<File>)>>, dir: String) -> JoinHandle<()> {
+fn parse_dir_walker_thread(tx_files: Sender<DirEntry<((), ())>>, dir: String) -> JoinHandle<()> {
     thread::spawn(move || {
-        for entry in WalkDirGeneric::<((), Option<File>)>::new(dir)
+        for entry in WalkDirGeneric::<((), ())>::new(dir)
         .sort(false)
         .skip_hidden(true)
         .follow_links(false)
-        .process_read_dir(|_, _, _, dir_entry_results| {
-            dir_entry_results.iter_mut().for_each(|f| {
-                if let Ok(entry) = f {
-                    if let Ok(file) = File::open(entry.path()) {
-                        entry.client_state = Some(file);
-                    } else {
-                        entry.client_state = None;
-                    }
-                }
-            })
-        })
         {
             if let Ok(entry) = entry {
                 if tx_files.clone().send(entry).is_err() {
@@ -86,11 +75,11 @@ fn parse_file_with_string(fd: File, path: &str, substr: &str) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-fn spawn_parser_thread(rx_parse: Receiver<jwalk::DirEntry<((), Option<File>)>>, substr: String, tx_output: Sender<Vec<String>>, matching_files_only: bool) -> JoinHandle<()> {
+fn spawn_parser_thread(rx_parse: Receiver<jwalk::DirEntry<((), ())>>, substr: String, tx_output: Sender<Vec<String>>, matching_files_only: bool) -> JoinHandle<()> {
     thread::spawn(move || {
         while let Ok(entry) = rx_parse.recv() {
             let path = entry.path();
-            if let Some(file) = entry.client_state {
+            if let Ok(file) = File::open(entry.path()) {
                 if matching_files_only {
                     if does_file_match(file, &substr) {
                         match tx_output.send(vec![path.to_string_lossy().to_string()]) {
