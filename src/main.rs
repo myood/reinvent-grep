@@ -116,7 +116,6 @@ impl BufRead for RioFile {
 }
 
 fn parse_file_with_string(rio_ring: &rio::Rio, fd: File, path: &str, substr: &str) -> Vec<String> {
-    println!("Parse {:?}", path);
     std::iter::once(path.to_string()).chain(
         BufReader::new(RioFile::from(fd, rio_ring)).lines()
             .take_while(|line| line.is_ok())
